@@ -3,7 +3,7 @@
 This directory contains separate inference and statistics tools for LLaMA-Factory-style JSON or JSONL data.
 
 - `run_inference.py`: loads the model and writes predictions.
-- `compute_stats.py`: reads prediction records and computes WER/SER.
+- `compute_stats.py`: reads prediction records and computes WER/CER/SER.
 - `run_eval.sh`: wrapper that can run `infer`, `stats`, or `both`.
 
 Input records can look like:
@@ -131,7 +131,9 @@ The report header contains:
 ```text
 sentence number: 100
 ref word number: 432
+ref char number: 2140
 wer: 0.034722 (3.47%)
+cer: 0.012150 (1.21%)
 ser: 0.120000 (12.00%)
 inference rtf: N/A (no positive duration field found)
 ```
@@ -144,3 +146,65 @@ hyp: raise music volume
 ```
 
 RTF is computed only when records contain a positive numeric duration field, default `duration`. For text-only data without duration, the report prints RTF as `N/A` and still reports inference seconds, average latency, and samples per second.
+
+## Multiple Test Sets
+
+Single-file `--input` still works. To run multiple test sets sequentially, create an input-list JSON object:
+
+```json
+{
+  "dev": "/path/to/dev.json",
+  "test": "/path/to/test.jsonl"
+}
+```
+
+Then run:
+
+```bash
+llamafactory_eval_tool/run_eval.sh both \
+  --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
+  --input_list /path/to/input_list.json \
+  --output-dir /path/to/eval_out
+```
+
+Batch output layout:
+
+```text
+eval_out/
+  res/
+    dev_res.json
+    dev_summary.json
+    test_res.jsonl
+    test_summary.json
+  stat/
+    dev_stat.txt
+    dev_stat.json
+    test_stat.txt
+    test_stat.json
+  batch_inference_summary.json
+  prediction_list.json
+  summary.tsv
+```
+
+`summary.tsv` contains:
+
+```text
+test_set_name	sentence_num	word_num	wer	cer	rtf
+```
+
+Batch modes can also run independently:
+
+```bash
+llamafactory_eval_tool/run_eval.sh infer \
+  --config llamafactory_eval_tool/example_config.yaml \
+  --input-list /path/to/input_list.json \
+  --output-dir /path/to/eval_out
+
+llamafactory_eval_tool/run_eval.sh stats \
+  --input-list /path/to/eval_out/prediction_list.json \
+  --output-dir /path/to/eval_out \
+  --inference-summary /path/to/eval_out/batch_inference_summary.json
+```
+
+`--input-list` and `--input_list` are both accepted. In `stats` mode, the list should point to prediction files, not raw input files.

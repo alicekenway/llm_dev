@@ -69,6 +69,49 @@ def load_records(path: Path) -> tuple[list[dict[str, Any]], str]:
     return records, "jsonl"
 
 
+def output_base_name(name: str, input_path: Path) -> str:
+    raw_name = str(name).strip() or input_path.name
+    stem = Path(raw_name).stem or input_path.stem
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
+    return safe or "set"
+
+
+def unique_output_base(name: str, input_path: Path, used_names: set[str]) -> str:
+    base = output_base_name(name, input_path)
+    candidate = base
+    index = 2
+    while candidate in used_names:
+        candidate = f"{base}_{index}"
+        index += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def load_input_list(path: Path) -> list[tuple[str, Path]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit(f"input list must be a JSON object mapping names to paths: {path}")
+
+    items: list[tuple[str, Path]] = []
+    used_names: set[str] = set()
+    for raw_name, raw_value in data.items():
+        if isinstance(raw_value, dict):
+            raw_path = raw_value.get("path")
+        else:
+            raw_path = raw_value
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise SystemExit(f"input list entry {raw_name!r} must be a path string")
+
+        input_path = Path(raw_path).expanduser()
+        if not input_path.is_absolute():
+            input_path = path.parent / input_path
+        input_path = input_path.resolve()
+        output_name = unique_output_base(str(raw_name), input_path, used_names)
+        items.append((output_name, input_path))
+
+    return items
+
+
 def validate_record(item: Any, line_no: int) -> dict[str, Any]:
     if not isinstance(item, dict):
         raise SystemExit(f"record {line_no} is not a JSON object")
@@ -83,6 +126,10 @@ def write_records(path: Path, records: list[dict[str, Any]], input_format: str) 
         else:
             for record in records:
                 file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def output_suffix_for_format(input_format: str) -> str:
+    return ".jsonl" if input_format == "jsonl" else ".json"
 
 
 def setup_logging(log_path: Path) -> None:
@@ -380,6 +427,13 @@ def words_for_metrics(text: str, metric_cfg: dict[str, Any]) -> list[str]:
     return normalized.split() if normalized else []
 
 
+def chars_for_metrics(text: str, metric_cfg: dict[str, Any]) -> list[str]:
+    normalized = normalize_text_for_metrics(text, metric_cfg)
+    if metric_cfg.get("cer_ignore_spaces", True):
+        normalized = re.sub(r"\s+", "", normalized)
+    return list(normalized)
+
+
 def edit_counts(ref_words: list[str], hyp_words: list[str]) -> tuple[int, int, int, int]:
     rows = len(ref_words) + 1
     cols = len(hyp_words) + 1
@@ -416,9 +470,13 @@ def compute_metrics(records: list[dict[str, Any]], config: dict[str, Any], predi
     duration_field = runtime_cfg.get("duration_field", "duration")
 
     total_ref_words = 0
+    total_ref_chars = 0
     substitutions = 0
     deletions = 0
     insertions = 0
+    char_substitutions = 0
+    char_deletions = 0
+    char_insertions = 0
     wrong_cases: list[dict[str, Any]] = []
     total_duration = 0.0
 
@@ -427,11 +485,18 @@ def compute_metrics(records: list[dict[str, Any]], config: dict[str, Any], predi
         hyp = as_text(record.get(prediction_field, ""))
         ref_words = words_for_metrics(ref, metric_cfg)
         hyp_words = words_for_metrics(hyp, metric_cfg)
+        ref_chars = chars_for_metrics(ref, metric_cfg)
+        hyp_chars = chars_for_metrics(hyp, metric_cfg)
         _, sub, delete, insert = edit_counts(ref_words, hyp_words)
+        _, char_sub, char_delete, char_insert = edit_counts(ref_chars, hyp_chars)
         substitutions += sub
         deletions += delete
         insertions += insert
+        char_substitutions += char_sub
+        char_deletions += char_delete
+        char_insertions += char_insert
         total_ref_words += len(ref_words)
+        total_ref_chars += len(ref_chars)
 
         if normalize_text_for_metrics(ref, metric_cfg) != normalize_text_for_metrics(hyp, metric_cfg):
             wrong_cases.append({"index": index, "ref": ref, "hyp": hyp})
@@ -442,6 +507,7 @@ def compute_metrics(records: list[dict[str, Any]], config: dict[str, Any], predi
 
     sentence_count = len(records)
     wer = (substitutions + deletions + insertions) / total_ref_words if total_ref_words else 0.0
+    cer = (char_substitutions + char_deletions + char_insertions) / total_ref_chars if total_ref_chars else 0.0
     ser = len(wrong_cases) / sentence_count if sentence_count else 0.0
     rtf = inference_seconds / total_duration if inference_seconds is not None and total_duration > 0 else None
     avg_latency = inference_seconds / sentence_count if inference_seconds is not None and sentence_count else None
@@ -449,10 +515,15 @@ def compute_metrics(records: list[dict[str, Any]], config: dict[str, Any], predi
     return {
         "sentence_number": sentence_count,
         "ref_word_number": total_ref_words,
+        "ref_char_number": total_ref_chars,
         "substitutions": substitutions,
         "deletions": deletions,
         "insertions": insertions,
+        "char_substitutions": char_substitutions,
+        "char_deletions": char_deletions,
+        "char_insertions": char_insertions,
         "wer": wer,
+        "cer": cer,
         "ser": ser,
         "wrong_sentence_number": len(wrong_cases),
         "inference_seconds": inference_seconds,
@@ -476,7 +547,9 @@ def write_report(path: Path, metrics: dict[str, Any]) -> None:
     lines = [
         f"sentence number: {metrics['sentence_number']}",
         f"ref word number: {metrics['ref_word_number']}",
+        f"ref char number: {metrics['ref_char_number']}",
         f"wer: {metrics['wer']:.6f} ({metrics['wer'] * 100:.2f}%)",
+        f"cer: {metrics['cer']:.6f} ({metrics['cer'] * 100:.2f}%)",
         f"ser: {metrics['ser']:.6f} ({metrics['ser'] * 100:.2f}%)",
         f"inference rtf: {rtf_text}",
         f"inference seconds: {inference_seconds_text}",
@@ -494,7 +567,9 @@ def write_report(path: Path, metrics: dict[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run inference on LLaMA-Factory-style data.")
     parser.add_argument("--config", required=True, help="YAML config with model, tokenizer, generation, runtime, and metric settings.")
-    parser.add_argument("--input", required=True, help="Input JSON array or JSONL file.")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--input", help="Input JSON array or JSONL file.")
+    input_group.add_argument("--input-list", "--input_list", help="JSON object mapping test set names to input files.")
     output_group = parser.add_mutually_exclusive_group(required=True)
     output_group.add_argument("--output", help="Prediction output file. Uses JSON array or JSONL format to match input.")
     output_group.add_argument("--output-dir", help="Directory for predictions, inference_summary.json, and inference.log.")
@@ -503,14 +578,128 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def write_inference_summary(path: Path, summary: dict[str, Any]) -> None:
+    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_one_input(
+    *,
+    name: str | None,
+    input_path: Path,
+    prediction_path: Path,
+    summary_path: Path,
+    tokenizer: Any,
+    model: Any,
+    config: dict[str, Any],
+    prediction_field: str,
+    limit: int | None,
+) -> dict[str, Any]:
+    records, input_format = load_records(input_path)
+    if limit:
+        records = records[:limit]
+
+    logging.info("Input: %s", input_path)
+    logging.info("Prediction output: %s", prediction_path)
+    logging.info("Records: %d", len(records))
+    logging.info("Input format: %s", input_format)
+    logging.info("Prediction field: %s", prediction_field)
+
+    predicted_records, inference_seconds = run_inference(records, tokenizer, model, config, prediction_field)
+    write_records(prediction_path, predicted_records, input_format)
+
+    summary = {
+        "name": name,
+        "input": str(input_path),
+        "predictions": str(prediction_path),
+        "record_count": len(predicted_records),
+        "prediction_field": prediction_field,
+        "input_format": input_format,
+        "inference_seconds": inference_seconds,
+        "avg_latency_seconds": inference_seconds / len(predicted_records) if predicted_records else None,
+        "samples_per_second": len(predicted_records) / inference_seconds if inference_seconds > 0 else None,
+    }
+    write_inference_summary(summary_path, summary)
+    logging.info("Predictions: %s", prediction_path)
+    logging.info("Inference summary: %s", summary_path)
+    logging.info("Inference seconds: %.6f", inference_seconds)
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config_path = Path(args.config).expanduser().resolve()
-    input_path = Path(args.input).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
 
     config = load_yaml(config_path)
     prediction_field = args.prediction_field or config.get("runtime", {}).get("prediction_field", DEFAULT_PREDICTION_FIELD)
+
+    if args.input_list:
+        if args.output:
+            raise SystemExit("--output is only supported with --input; use --output-dir with --input-list")
+        assert output_dir is not None
+        output_root = output_dir
+        output_root.mkdir(parents=True, exist_ok=True)
+        res_dir = output_root / "res"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        setup_logging(output_root / "inference.log")
+
+        input_list_path = Path(args.input_list).expanduser().resolve()
+        input_items = load_input_list(input_list_path)
+
+        logging.info("Config: %s", config_path)
+        logging.info("Input list: %s", input_list_path)
+        logging.info("Output dir: %s", output_root)
+        logging.info("Test sets: %d", len(input_items))
+
+        tokenizer, model = load_tokenizer_and_model(config)
+        summaries: list[dict[str, Any]] = []
+        prediction_list: dict[str, str] = {}
+        total_records = 0
+        total_inference_seconds = 0.0
+
+        for name, input_path in input_items:
+            records, input_format = load_records(input_path)
+            if args.limit:
+                records = records[: args.limit]
+            prediction_path = res_dir / f"{name}_res{output_suffix_for_format(input_format)}"
+            summary_path = res_dir / f"{name}_summary.json"
+            logging.info("Running test set: %s", name)
+            predicted_records, inference_seconds = run_inference(records, tokenizer, model, config, prediction_field)
+            write_records(prediction_path, predicted_records, input_format)
+            summary = {
+                "name": name,
+                "input": str(input_path),
+                "predictions": str(prediction_path),
+                "record_count": len(predicted_records),
+                "prediction_field": prediction_field,
+                "input_format": input_format,
+                "inference_seconds": inference_seconds,
+                "avg_latency_seconds": inference_seconds / len(predicted_records) if predicted_records else None,
+                "samples_per_second": len(predicted_records) / inference_seconds if inference_seconds > 0 else None,
+            }
+            write_inference_summary(summary_path, summary)
+            summaries.append(summary)
+            prediction_list[name] = str(prediction_path)
+            total_records += len(predicted_records)
+            total_inference_seconds += inference_seconds
+            logging.info("Finished test set %s in %.6f seconds", name, inference_seconds)
+
+        batch_summary = {
+            "input_list": str(input_list_path),
+            "prediction_list": str(output_root / "prediction_list.json"),
+            "set_count": len(summaries),
+            "record_count": total_records,
+            "inference_seconds": total_inference_seconds,
+            "sets": summaries,
+        }
+        write_inference_summary(output_root / "batch_inference_summary.json", batch_summary)
+        (output_root / "prediction_list.json").write_text(json.dumps(prediction_list, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        logging.info("Batch inference summary: %s", output_root / "batch_inference_summary.json")
+        logging.info("Prediction list: %s", output_root / "prediction_list.json")
+        return 0
+
+    assert args.input is not None
+    input_path = Path(args.input).expanduser().resolve()
     records, input_format = load_records(input_path)
     if args.limit:
         records = records[: args.limit]
@@ -533,25 +722,17 @@ def main(argv: list[str] | None = None) -> int:
     logging.info("Prediction field: %s", prediction_field)
 
     tokenizer, model = load_tokenizer_and_model(config)
-    predicted_records, inference_seconds = run_inference(records, tokenizer, model, config, prediction_field)
-    write_records(prediction_path, predicted_records, input_format)
-
-    summary_path = output_root / "inference_summary.json"
-    summary = {
-        "input": str(input_path),
-        "predictions": str(prediction_path),
-        "record_count": len(predicted_records),
-        "prediction_field": prediction_field,
-        "input_format": input_format,
-        "inference_seconds": inference_seconds,
-        "avg_latency_seconds": inference_seconds / len(predicted_records) if predicted_records else None,
-        "samples_per_second": len(predicted_records) / inference_seconds if inference_seconds > 0 else None,
-    }
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    logging.info("Predictions: %s", prediction_path)
-    logging.info("Inference summary: %s", summary_path)
-    logging.info("Inference seconds: %.6f", inference_seconds)
+    run_one_input(
+        name=None,
+        input_path=input_path,
+        prediction_path=prediction_path,
+        summary_path=output_root / "inference_summary.json",
+        tokenizer=tokenizer,
+        model=model,
+        config=config,
+        prediction_field=prediction_field,
+        limit=args.limit,
+    )
     return 0
 
 

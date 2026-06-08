@@ -7,18 +7,22 @@ usage() {
   cat <<'USAGE'
 Usage:
   run_eval.sh infer --config CONFIG --input INPUT --output-dir OUTDIR [options]
+  run_eval.sh infer --config CONFIG --input-list INPUT_LIST --output-dir OUTDIR [options]
   run_eval.sh stats [--config CONFIG] --input PREDICTIONS --output-dir OUTDIR [options]
+  run_eval.sh stats [--config CONFIG] --input-list PREDICTION_LIST --output-dir OUTDIR [options]
   run_eval.sh both  --config CONFIG --input INPUT --output-dir OUTDIR [options]
+  run_eval.sh both  --config CONFIG --input-list INPUT_LIST --output-dir OUTDIR [options]
 
 Modes:
   infer    Run model inference only.
-  stats    Compute WER/SER statistics only.
+  stats    Compute WER/CER/SER statistics only.
   both     Run inference, then statistics.
 
 Common options:
   --config PATH              YAML config.
   --env-dir PATH             Python environment directory containing bin/activate.
   --input PATH               Input JSON/JSONL. In stats mode this is the predictions file.
+  --input-list PATH          JSON object mapping test set names to files. Alias: --input_list.
   --output-dir PATH          Directory for outputs.
   --prediction-field NAME    Prediction field name. Default: prediction.
   --limit N                  Inference-only record limit.
@@ -41,6 +45,7 @@ shift
 CONFIG=""
 ENV_DIR=""
 INPUT=""
+INPUT_LIST=""
 OUTPUT_DIR=""
 PREDICTIONS=""
 PREDICTION_FIELD=""
@@ -61,6 +66,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --input)
       INPUT="${2:?missing value for --input}"
+      shift 2
+      ;;
+    --input-list|--input_list)
+      INPUT_LIST="${2:?missing value for $1}"
       shift 2
       ;;
     --output-dir)
@@ -95,8 +104,18 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -z "${INPUT}" ] || [ -z "${OUTPUT_DIR}" ]; then
-  echo "--input and --output-dir are required" >&2
+if [ -z "${OUTPUT_DIR}" ]; then
+  echo "--output-dir is required" >&2
+  usage >&2
+  exit 2
+fi
+if [ -z "${INPUT}" ] && [ -z "${INPUT_LIST}" ]; then
+  echo "one of --input or --input-list is required" >&2
+  usage >&2
+  exit 2
+fi
+if [ -n "${INPUT}" ] && [ -n "${INPUT_LIST}" ]; then
+  echo "use only one of --input or --input-list" >&2
   usage >&2
   exit 2
 fi
@@ -122,7 +141,12 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-infer_args=(--config "${CONFIG}" --input "${INPUT}" --output-dir "${OUTPUT_DIR}")
+infer_args=(--config "${CONFIG}" --output-dir "${OUTPUT_DIR}")
+if [ -n "${INPUT_LIST}" ]; then
+  infer_args+=(--input-list "${INPUT_LIST}")
+else
+  infer_args+=(--input "${INPUT}")
+fi
 stats_args=(--output-dir "${OUTPUT_DIR}")
 if [ -n "${CONFIG}" ]; then
   stats_args+=(--config "${CONFIG}")
@@ -147,21 +171,33 @@ case "${MODE}" in
     "${PYTHON_BIN}" "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
     ;;
   stats)
-    stats_input="${PREDICTIONS:-${INPUT}}"
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${stats_input}"
+    if [ -n "${INPUT_LIST}" ]; then
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input-list "${INPUT_LIST}"
+    else
+      stats_input="${PREDICTIONS:-${INPUT}}"
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${stats_input}"
+    fi
     ;;
   both)
     "${PYTHON_BIN}" "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
-    if [ -z "${PREDICTIONS}" ]; then
-      case "${INPUT}" in
-        *.jsonl) PREDICTIONS="${OUTPUT_DIR}/predictions.jsonl" ;;
-        *) PREDICTIONS="${OUTPUT_DIR}/predictions.json" ;;
-      esac
+    if [ -n "${INPUT_LIST}" ]; then
+      stats_input_list="${PREDICTIONS:-${OUTPUT_DIR}/prediction_list.json}"
+      if [ -z "${INFERENCE_SUMMARY}" ]; then
+        stats_args+=(--inference-summary "${OUTPUT_DIR}/batch_inference_summary.json")
+      fi
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input-list "${stats_input_list}"
+    else
+      if [ -z "${PREDICTIONS}" ]; then
+        case "${INPUT}" in
+          *.jsonl) PREDICTIONS="${OUTPUT_DIR}/predictions.jsonl" ;;
+          *) PREDICTIONS="${OUTPUT_DIR}/predictions.json" ;;
+        esac
+      fi
+      if [ -z "${INFERENCE_SUMMARY}" ]; then
+        stats_args+=(--inference-summary "${OUTPUT_DIR}/inference_summary.json")
+      fi
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${PREDICTIONS}"
     fi
-    if [ -z "${INFERENCE_SUMMARY}" ]; then
-      stats_args+=(--inference-summary "${OUTPUT_DIR}/inference_summary.json")
-    fi
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${PREDICTIONS}"
     ;;
   *)
     echo "Unknown mode: ${MODE}" >&2

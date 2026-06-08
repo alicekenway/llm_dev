@@ -80,6 +80,23 @@ llamafactory_eval_tool/run_eval.sh both \
   --output-dir /path/to/eval_out
 ```
 
+Run multiple test sets by passing an input-list JSON:
+
+```json
+{
+  "dev": "/path/to/dev.json",
+  "test": "/path/to/test.jsonl"
+}
+```
+
+```bash
+llamafactory_eval_tool/run_eval.sh both \
+  --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
+  --input_list /path/to/input_list.json \
+  --output-dir /path/to/eval_out
+```
+
 Or run them separately:
 
 ```bash
@@ -100,8 +117,9 @@ Evaluation outputs:
 - `predictions.json` or `predictions.jsonl`: original records plus a `prediction` field.
 - `inference.log`: runtime log from inference.
 - `inference_summary.json`: elapsed time, item count, and throughput metadata.
-- `report.txt`: summary header with sentence count, reference word count, WER, SER, optional inference RTF, followed by wrong cases.
+- `report.txt`: summary header with sentence count, reference word count, WER, CER, SER, optional inference RTF, followed by wrong cases.
 - `metrics.json`: machine-readable statistics.
+- Batch mode writes per-set predictions under `res/`, per-set reports and metrics under `stat/`, and a top-level `summary.tsv` table with test set name, sentence count, word count, WER, CER, and RTF.
 
 Stats can be rerun without loading the model as long as the prediction file already exists.
 
