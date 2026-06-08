@@ -1,0 +1,35 @@
+model:
+  model_name_or_path: /mnt/users/jinyang_wang/LLM/model/Qwen3.6-35B-A3B
+  adapter_name_or_path: /mnt/users/jinyang_wang/LLM/training_expts_llamaFactory/expts1/output/checkpoint-100
+  trust_remote_code: true
+  torch_dtype: bfloat16
+  device_map: auto
+  auto_class: causal_lm
+
+tokenizer:
+  trust_remote_code: true
+  padding_side: left
+
+generation:
+  max_new_tokens: 128
+  do_sample: false
+  repetition_penalty: 1.05
+
+runtime:
+  batch_size: 4
+  max_input_length: 4096
+  use_chat_template: true
+  add_generation_prompt: true
+  system_field: system
+  instruction_field: instruction
+  input_field: input
+  history_field: history
+  reference_field: output
+  prediction_field: prediction
+  duration_field: duration
+
+metrics:
+  lowercase: true
+  strip: true
+  collapse_spaces: true
+  remove_punctuation: false
