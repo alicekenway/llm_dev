@@ -17,6 +17,7 @@ Modes:
 
 Common options:
   --config PATH              YAML config.
+  --env-dir PATH             Python environment directory containing bin/activate.
   --input PATH               Input JSON/JSONL. In stats mode this is the predictions file.
   --output-dir PATH          Directory for outputs.
   --prediction-field NAME    Prediction field name. Default: prediction.
@@ -38,6 +39,7 @@ MODE="$1"
 shift
 
 CONFIG=""
+ENV_DIR=""
 INPUT=""
 OUTPUT_DIR=""
 PREDICTIONS=""
@@ -45,11 +47,16 @@ PREDICTION_FIELD=""
 LIMIT=""
 INFERENCE_SUMMARY=""
 INFERENCE_SECONDS=""
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --config)
       CONFIG="${2:?missing value for --config}"
+      shift 2
+      ;;
+    --env-dir|--env-path)
+      ENV_DIR="${2:?missing value for $1}"
       shift 2
       ;;
     --input)
@@ -98,6 +105,20 @@ if [ "${MODE}" != "stats" ] && [ -z "${CONFIG}" ]; then
   usage >&2
   exit 2
 fi
+if [ -n "${ENV_DIR}" ]; then
+  ENV_DIR="${ENV_DIR%/}"
+  ACTIVATE_SCRIPT="${ENV_DIR}/bin/activate"
+  if [ ! -f "${ACTIVATE_SCRIPT}" ]; then
+    echo "--env-dir must contain bin/activate: ${ACTIVATE_SCRIPT}" >&2
+    exit 2
+  fi
+  # shellcheck disable=SC1090
+  source "${ACTIVATE_SCRIPT}"
+  PYTHON_BIN="${ENV_DIR}/bin/python"
+  if [ ! -x "${PYTHON_BIN}" ]; then
+    PYTHON_BIN="$(command -v python)"
+  fi
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -123,14 +144,14 @@ fi
 
 case "${MODE}" in
   infer)
-    python3 "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
     ;;
   stats)
     stats_input="${PREDICTIONS:-${INPUT}}"
-    python3 "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${stats_input}"
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${stats_input}"
     ;;
   both)
-    python3 "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/run_inference.py" "${infer_args[@]}"
     if [ -z "${PREDICTIONS}" ]; then
       case "${INPUT}" in
         *.jsonl) PREDICTIONS="${OUTPUT_DIR}/predictions.jsonl" ;;
@@ -140,7 +161,7 @@ case "${MODE}" in
     if [ -z "${INFERENCE_SUMMARY}" ]; then
       stats_args+=(--inference-summary "${OUTPUT_DIR}/inference_summary.json")
     fi
-    python3 "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${PREDICTIONS}"
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/compute_stats.py" "${stats_args[@]}" --input "${PREDICTIONS}"
     ;;
   *)
     echo "Unknown mode: ${MODE}" >&2

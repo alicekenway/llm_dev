@@ -25,6 +25,7 @@ Input records can look like:
 ```bash
 llamafactory_eval_tool/run_eval.sh both \
   --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
   --input /path/to/test.json \
   --output-dir /path/to/eval_out
 ```
@@ -64,6 +65,7 @@ The wrapper can run either part:
 ```bash
 llamafactory_eval_tool/run_eval.sh infer \
   --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
   --input /path/to/test.json \
   --output-dir /path/to/eval_out
 
@@ -71,6 +73,8 @@ llamafactory_eval_tool/run_eval.sh stats \
   --input /path/to/eval_out/predictions.json \
   --output-dir /path/to/eval_out
 ```
+
+Pass `--env-dir /path/to/env` when you want the wrapper to source `/path/to/env/bin/activate` and run the tools with that environment's Python. `--env-path` is accepted as an alias.
 
 You can also write predictions to an explicit file:
 

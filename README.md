@@ -75,6 +75,7 @@ Run inference and statistics in one command:
 ```bash
 llamafactory_eval_tool/run_eval.sh both \
   --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
   --input /path/to/test.json \
   --output-dir /path/to/eval_out
 ```
@@ -84,6 +85,7 @@ Or run them separately:
 ```bash
 llamafactory_eval_tool/run_eval.sh infer \
   --config llamafactory_eval_tool/example_config.yaml \
+  --env-dir /path/to/llamafactory_env \
   --input /path/to/test.json \
   --output-dir /path/to/eval_out
 
@@ -102,6 +104,8 @@ Evaluation outputs:
 - `metrics.json`: machine-readable statistics.
 
 Stats can be rerun without loading the model as long as the prediction file already exists.
+
+For evaluation, pass `--env-dir /path/to/env` to source `/path/to/env/bin/activate` and run the Python tools with that environment's interpreter.
 
 ## Common Workflow
 
