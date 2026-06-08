@@ -126,9 +126,16 @@ runtime:
   prediction_field: prediction
   enable_thinking: false
   remove_thinking: true
+
+metrics:
+  lowercase: true
+  remove_punctuation: true
+  collapse_spaces: true
 ```
 
 For Qwen-style thinking models, keep `runtime.enable_thinking: false`. Otherwise the chat template may allow the model to generate reasoning text such as `Thinking Process:` before the final rewrite. `runtime.remove_thinking: true` also strips explicit `<think>...</think>` blocks if the model still emits them.
+
+Metrics are case-insensitive by default and ignore punctuation by default. This affects WER, CER, SER, and wrong-case detection.
 
 ## Report Format
 

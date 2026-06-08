@@ -34,4 +34,4 @@ metrics:
   lowercase: true
   strip: true
   collapse_spaces: true
-  remove_punctuation: false
+  remove_punctuation: true

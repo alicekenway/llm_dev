@@ -503,7 +503,7 @@ def normalize_text_for_metrics(text: str, metric_cfg: dict[str, Any]) -> str:
     normalized = text.strip() if metric_cfg.get("strip", True) else text
     if metric_cfg.get("lowercase", True):
         normalized = normalized.lower()
-    if metric_cfg.get("remove_punctuation", False):
+    if metric_cfg.get("remove_punctuation", True):
         normalized = re.sub(r"[^\w\s]", " ", normalized)
     if metric_cfg.get("collapse_spaces", True):
         normalized = re.sub(r"\s+", " ", normalized).strip()

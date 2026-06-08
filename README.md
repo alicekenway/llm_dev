@@ -124,6 +124,7 @@ Evaluation outputs:
 Stats can be rerun without loading the model as long as the prediction file already exists.
 Prediction files are flushed after each inference batch, so you can inspect partial results while a set is still running.
 For Qwen-style thinking models, set `runtime.enable_thinking: false` in the eval YAML to prevent reasoning text from appearing in predictions.
+Metrics are case-insensitive and ignore punctuation by default.
 
 For evaluation, pass `--env-dir /path/to/env` to source `/path/to/env/bin/activate` and run the Python tools with that environment's interpreter.
 
