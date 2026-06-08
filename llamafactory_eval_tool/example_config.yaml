@@ -20,6 +20,8 @@ runtime:
   max_input_length: 4096
   use_chat_template: true
   add_generation_prompt: true
+  enable_thinking: false
+  remove_thinking: true
   system_field: system
   instruction_field: instruction
   input_field: input

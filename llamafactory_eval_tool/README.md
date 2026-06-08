@@ -38,6 +38,8 @@ Outputs:
 - `report.txt`: statistics header and wrong cases
 - `metrics.json`: machine-readable metrics
 
+Prediction files are streamed to disk after each inference batch, so partial results are visible before the full set finishes.
+
 ## Run Separately
 
 Inference only:
@@ -122,7 +124,11 @@ runtime:
   batch_size: 4
   max_input_length: 4096
   prediction_field: prediction
+  enable_thinking: false
+  remove_thinking: true
 ```
+
+For Qwen-style thinking models, keep `runtime.enable_thinking: false`. Otherwise the chat template may allow the model to generate reasoning text such as `Thinking Process:` before the final rewrite. `runtime.remove_thinking: true` also strips explicit `<think>...</think>` blocks if the model still emits them.
 
 ## Report Format
 

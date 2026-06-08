@@ -128,6 +128,40 @@ def write_records(path: Path, records: list[dict[str, Any]], input_format: str) 
                 file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+class StreamingRecordWriter:
+    def __init__(self, path: Path, input_format: str) -> None:
+        self.path = path
+        self.input_format = input_format
+        self.count = 0
+        self.file = path.open("w", encoding="utf-8")
+        if self.input_format == "json_array":
+            self.file.write("[\n")
+
+    def write_many(self, records: list[dict[str, Any]]) -> None:
+        if self.input_format == "json_array":
+            for record in records:
+                if self.count:
+                    self.file.write(",\n")
+                json.dump(record, self.file, ensure_ascii=False, indent=2)
+                self.count += 1
+        else:
+            for record in records:
+                self.file.write(json.dumps(record, ensure_ascii=False) + "\n")
+                self.count += 1
+        self.file.flush()
+
+    def close(self) -> None:
+        if self.input_format == "json_array":
+            self.file.write("\n]\n")
+        self.file.close()
+
+    def __enter__(self) -> "StreamingRecordWriter":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+
 def output_suffix_for_format(input_format: str) -> str:
     return ".jsonl" if input_format == "jsonl" else ".json"
 
@@ -314,13 +348,35 @@ def build_prompt(record: dict[str, Any], tokenizer: Any, runtime_cfg: dict[str, 
     messages = build_messages(record, runtime_cfg)
     use_chat_template = runtime_cfg.get("use_chat_template", True)
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
-        return tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=runtime_cfg.get("add_generation_prompt", True),
-        )
+        template_kwargs = dict(runtime_cfg.get("chat_template_kwargs", {}) or {})
+        if "enable_thinking" in runtime_cfg:
+            template_kwargs["enable_thinking"] = bool(runtime_cfg["enable_thinking"])
+        else:
+            template_kwargs.setdefault("enable_thinking", False)
+
+        base_kwargs = {
+            "tokenize": False,
+            "add_generation_prompt": runtime_cfg.get("add_generation_prompt", True),
+        }
+        try:
+            return tokenizer.apply_chat_template(messages, **base_kwargs, **template_kwargs)
+        except TypeError:
+            if template_kwargs:
+                logging.warning("Tokenizer rejected chat template kwargs %s; retrying without them", sorted(template_kwargs))
+            return tokenizer.apply_chat_template(messages, **base_kwargs)
 
     return "\n".join(f"{message['role']}: {message['content']}" for message in messages) + "\nassistant:"
+
+
+def clean_prediction_text(text: str, runtime_cfg: dict[str, Any]) -> str:
+    cleaned = text
+    if runtime_cfg.get("remove_thinking", True):
+        cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r"^\s*</think>\s*", "", cleaned, flags=re.IGNORECASE)
+
+    if runtime_cfg.get("strip_prediction", True):
+        cleaned = cleaned.strip()
+    return cleaned
 
 
 def model_input_device(model: Any):
@@ -359,22 +415,19 @@ def generation_kwargs_from_config(config: dict[str, Any]) -> dict[str, Any]:
     return generation_cfg
 
 
-def run_inference(
+def iter_prediction_batches(
     records: list[dict[str, Any]],
     tokenizer: Any,
     model: Any,
     config: dict[str, Any],
     prediction_field: str,
-) -> tuple[list[dict[str, Any]], float]:
+):
     runtime_cfg = dict(config.get("runtime", {}))
     batch_size = int(runtime_cfg.get("batch_size", 1))
     max_input_length = runtime_cfg.get("max_input_length")
-    strip_prediction = runtime_cfg.get("strip_prediction", True)
     skip_special_tokens = runtime_cfg.get("skip_special_tokens", True)
     generation_kwargs = generation_kwargs_from_config(config)
     device = model_input_device(model)
-    output_records: list[dict[str, Any]] = []
-    total_inference_seconds = 0.0
 
     for start in range(0, len(records), batch_size):
         batch_records = records[start : start + batch_size]
@@ -398,17 +451,52 @@ def run_inference(
         with torch.inference_mode():
             generated = model.generate(**tokenized, **generation_kwargs)
         decoded = tokenizer.batch_decode(generated[:, input_width:], skip_special_tokens=skip_special_tokens)
-        if strip_prediction:
-            decoded = [text.strip() for text in decoded]
+        decoded = [clean_prediction_text(text, runtime_cfg) for text in decoded]
         cuda_synchronize_if_needed()
-        total_inference_seconds += time.perf_counter() - batch_start
+        batch_inference_seconds = time.perf_counter() - batch_start
 
+        output_records: list[dict[str, Any]] = []
         for record, prediction in zip(batch_records, decoded):
             item = copy.deepcopy(record)
             item[prediction_field] = prediction
             output_records.append(item)
 
+        yield output_records, batch_inference_seconds
+
+
+def run_inference(
+    records: list[dict[str, Any]],
+    tokenizer: Any,
+    model: Any,
+    config: dict[str, Any],
+    prediction_field: str,
+) -> tuple[list[dict[str, Any]], float]:
+    output_records: list[dict[str, Any]] = []
+    total_inference_seconds = 0.0
+    for batch_records, batch_seconds in iter_prediction_batches(records, tokenizer, model, config, prediction_field):
+        output_records.extend(batch_records)
+        total_inference_seconds += batch_seconds
     return output_records, total_inference_seconds
+
+
+def run_inference_to_file(
+    prediction_path: Path,
+    input_format: str,
+    records: list[dict[str, Any]],
+    tokenizer: Any,
+    model: Any,
+    config: dict[str, Any],
+    prediction_field: str,
+) -> tuple[int, float]:
+    total_records = 0
+    total_inference_seconds = 0.0
+    with StreamingRecordWriter(prediction_path, input_format) as writer:
+        for batch_records, batch_seconds in iter_prediction_batches(records, tokenizer, model, config, prediction_field):
+            writer.write_many(batch_records)
+            total_records += len(batch_records)
+            total_inference_seconds += batch_seconds
+            logging.info("Wrote %d predictions to %s", total_records, prediction_path)
+    return total_records, total_inference_seconds
 
 
 def normalize_text_for_metrics(text: str, metric_cfg: dict[str, Any]) -> str:
@@ -604,19 +692,26 @@ def run_one_input(
     logging.info("Input format: %s", input_format)
     logging.info("Prediction field: %s", prediction_field)
 
-    predicted_records, inference_seconds = run_inference(records, tokenizer, model, config, prediction_field)
-    write_records(prediction_path, predicted_records, input_format)
+    record_count, inference_seconds = run_inference_to_file(
+        prediction_path,
+        input_format,
+        records,
+        tokenizer,
+        model,
+        config,
+        prediction_field,
+    )
 
     summary = {
         "name": name,
         "input": str(input_path),
         "predictions": str(prediction_path),
-        "record_count": len(predicted_records),
+        "record_count": record_count,
         "prediction_field": prediction_field,
         "input_format": input_format,
         "inference_seconds": inference_seconds,
-        "avg_latency_seconds": inference_seconds / len(predicted_records) if predicted_records else None,
-        "samples_per_second": len(predicted_records) / inference_seconds if inference_seconds > 0 else None,
+        "avg_latency_seconds": inference_seconds / record_count if record_count else None,
+        "samples_per_second": record_count / inference_seconds if inference_seconds > 0 else None,
     }
     write_inference_summary(summary_path, summary)
     logging.info("Predictions: %s", prediction_path)
@@ -664,23 +759,30 @@ def main(argv: list[str] | None = None) -> int:
             prediction_path = res_dir / f"{name}_res{output_suffix_for_format(input_format)}"
             summary_path = res_dir / f"{name}_summary.json"
             logging.info("Running test set: %s", name)
-            predicted_records, inference_seconds = run_inference(records, tokenizer, model, config, prediction_field)
-            write_records(prediction_path, predicted_records, input_format)
+            record_count, inference_seconds = run_inference_to_file(
+                prediction_path,
+                input_format,
+                records,
+                tokenizer,
+                model,
+                config,
+                prediction_field,
+            )
             summary = {
                 "name": name,
                 "input": str(input_path),
                 "predictions": str(prediction_path),
-                "record_count": len(predicted_records),
+                "record_count": record_count,
                 "prediction_field": prediction_field,
                 "input_format": input_format,
                 "inference_seconds": inference_seconds,
-                "avg_latency_seconds": inference_seconds / len(predicted_records) if predicted_records else None,
-                "samples_per_second": len(predicted_records) / inference_seconds if inference_seconds > 0 else None,
+                "avg_latency_seconds": inference_seconds / record_count if record_count else None,
+                "samples_per_second": record_count / inference_seconds if inference_seconds > 0 else None,
             }
             write_inference_summary(summary_path, summary)
             summaries.append(summary)
             prediction_list[name] = str(prediction_path)
-            total_records += len(predicted_records)
+            total_records += record_count
             total_inference_seconds += inference_seconds
             logging.info("Finished test set %s in %.6f seconds", name, inference_seconds)
 

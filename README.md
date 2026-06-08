@@ -122,6 +122,8 @@ Evaluation outputs:
 - Batch mode writes per-set predictions under `res/`, per-set reports and metrics under `stat/`, and a top-level `summary.tsv` table with test set name, sentence count, word count, WER, CER, and RTF.
 
 Stats can be rerun without loading the model as long as the prediction file already exists.
+Prediction files are flushed after each inference batch, so you can inspect partial results while a set is still running.
+For Qwen-style thinking models, set `runtime.enable_thinking: false` in the eval YAML to prevent reasoning text from appearing in predictions.
 
 For evaluation, pass `--env-dir /path/to/env` to source `/path/to/env/bin/activate` and run the Python tools with that environment's interpreter.
 
