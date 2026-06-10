@@ -177,8 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config-format",
         choices=["v1", "classic"],
-        default="v1",
-        help="Generated LLaMA-Factory export config format. Default: v1.",
+        default="classic",
+        help="Generated LLaMA-Factory export config format. Default: classic.",
     )
     parser.add_argument("--template", help="Optional LLaMA-Factory template name.")
     parser.add_argument(
@@ -215,7 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_set_item,
         default=[],
         metavar="KEY=VALUE",
-        help="Override generated config values. Supports dotted keys such as peft_config.infer_dtype=bfloat16.",
+        help="Override generated config values. Supports dotted keys for nested config values.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Write config and print command without running export.")
     return parser

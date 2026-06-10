@@ -21,16 +21,16 @@ python3 llamafactory_export_tool/export_merged_model.py \
   --env-dir /path/to/llamafactory_env
 ```
 
-For the current LLaMA-Factory v1 config style, the generated config looks like:
+By default, the generated config uses the classic `llamafactory-cli export` keys:
 
 ```yaml
-model: /path/to/base_model
-peft_config:
-  name: lora
-  adapter_name_or_path: /path/to/lora_adapter
-  export_dir: /path/to/merged_model
-  export_size: 5
-  infer_dtype: auto
+model_name_or_path: /path/to/base_model
+adapter_name_or_path: /path/to/lora_adapter
+finetuning_type: lora
+export_dir: /path/to/merged_model
+export_size: 5
+export_device: auto
+infer_dtype: auto
 trust_remote_code: true
 ```
 
@@ -58,8 +58,8 @@ model:
 
 ## Options
 
-- `--config-format v1`: default, matches the current `examples/v1/train_lora/export_lora.yaml` style.
-- `--config-format classic`: writes flat LLaMA-Factory export keys such as `model_name_or_path`, `adapter_name_or_path`, and `export_dir`.
+- `--config-format classic`: default, writes flat LLaMA-Factory export keys such as `model_name_or_path`, `adapter_name_or_path`, and `export_dir`.
+- `--config-format v1`: writes the newer `model` plus `peft_config` structure for LLaMA-Factory installs that use the v1 export path.
 - `--infer-dtype auto|float16|bfloat16|float32`: dtype used during export.
 - `--export-size N`: model shard size in GB.
 - `--allow-existing-output`: allow writing into a non-empty output directory.
