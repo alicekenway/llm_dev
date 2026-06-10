@@ -11,9 +11,120 @@ tokenizer:
   padding_side: left
 
 generation:
+  # Active defaults for deterministic evaluation.
   max_new_tokens: 128
   do_sample: false
   repetition_penalty: 1.05
+
+  # Any uncommented key in this section is forwarded to model.generate(...).
+  # Exact support depends on the installed transformers version and model class.
+  # Keep unused options commented out; uncommented null values are still passed.
+  #
+  # Length and stopping:
+  # max_length: 512
+  # min_length: 0
+  # min_new_tokens: 0
+  # early_stopping: false
+  # max_time: 30.0
+  # stop_strings:
+  #   - "\n\n"
+  #
+  # Generation strategy:
+  # num_beams: 1
+  # penalty_alpha: 0.6
+  # dola_layers: low
+  # num_beam_groups: 1
+  # diversity_penalty: 0.0
+  # constraints: null
+  # force_words_ids:
+  #   - [0]
+  #
+  # Sampling and logits processing:
+  # temperature: 0.7
+  # top_k: 50
+  # top_p: 0.9
+  # min_p: 0.05
+  # Newer transformers versions may support top_h.
+  # top_h: 0.5
+  # typical_p: 1.0
+  # epsilon_cutoff: 0.0
+  # eta_cutoff: 0.0
+  # encoder_repetition_penalty: 1.0
+  # length_penalty: 1.0
+  # no_repeat_ngram_size: 0
+  # bad_words_ids:
+  #   - [0]
+  # renormalize_logits: true
+  # forced_bos_token_id: 0
+  # forced_eos_token_id: 0
+  # remove_invalid_values: false
+  # exponential_decay_length_penalty:
+  #   - 32
+  #   - 1.2
+  # suppress_tokens:
+  #   - 0
+  # begin_suppress_tokens:
+  #   - 0
+  # sequence_bias:
+  #   "(0, 1)": -1.0
+  # token_healing: false
+  # guidance_scale: 1.0
+  # watermarking_config:
+  #   greenlist_ratio: 0.25
+  #
+  # Cache:
+  # use_cache: true
+  # cache_implementation: dynamic
+  # cache_config: {}
+  # return_legacy_cache: true
+  # prefill_chunk_size: 1024
+  #
+  # Returned outputs:
+  # num_return_sequences: 1
+  # output_attentions: false
+  # output_hidden_states: false
+  # output_scores: false
+  # output_logits: false
+  # return_dict_in_generate: false
+  #
+  # Special tokens:
+  # pad_token_id: 0
+  # bos_token_id: 0
+  # eos_token_id: 0
+  #
+  # Encoder-decoder only:
+  # encoder_no_repeat_ngram_size: 0
+  # decoder_start_token_id: 0
+  #
+  # Assisted/speculative generation:
+  # is_assistant: false
+  # num_assistant_tokens: 20
+  # num_assistant_tokens_schedule: heuristic
+  # assistant_confidence_threshold: 0.4
+  # prompt_lookup_num_tokens: 0
+  # max_matching_ngram_size: 2
+  # assistant_early_exit: 0
+  # assistant_lookbehind: 0
+  # target_lookbehind: 0
+  #
+  # Performance:
+  # low_memory: false
+  # compile_config: {}
+  # disable_compile: false
+  #
+  # Advanced generate(...) kwargs. Most are Python objects or tensors and are
+  # usually not useful from YAML in this tool:
+  # synced_gpus: false
+  # use_model_defaults: true
+  # custom_generate: /path/to/custom_generate_repo
+  # generation_config: /path/to/generation_config.json
+  # logits_processor: null
+  # stopping_criteria: null
+  # prefix_allowed_tokens_fn: null
+  # assistant_model: null
+  # streamer: null
+  # negative_prompt_ids: null
+  # negative_prompt_attention_mask: null
 
 runtime:
   batch_size: 4
