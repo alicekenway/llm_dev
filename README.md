@@ -11,6 +11,8 @@ This directory contains helper tools for running LLaMA-Factory training on Slurm
 - `llamafactory_eval_tool/`
   - Inference and statistics tools for post-training evaluation.
   - Inference and stats can run independently, or sequentially through the wrapper script.
+- `llamafactory_export_tool/`
+  - Exports a LLaMA-Factory LoRA adapter into a merged Hugging Face model for evaluation or serving.
 - `testing/`
   - Scratch area for local tests or examples.
 
@@ -132,11 +134,13 @@ For evaluation, pass `--env-dir /path/to/env` to source `/path/to/env/bin/activa
 
 1. Prepare the LLaMA-Factory training YAML.
 2. Launch training with `slurm_llamafactory/llamafactory_slurm_launcher.py`.
-3. Put the trained adapter/model path into an evaluation YAML.
-4. Run `llamafactory_eval_tool/run_eval.sh both`.
-5. Inspect `report.txt` for aggregate quality and wrong cases.
+3. If direct adapter loading is not compatible with your eval or serving stack, merge the adapter with `llamafactory_export_tool/export_merged_model.py`.
+4. Put the trained adapter or merged model path into an evaluation YAML.
+5. Run `llamafactory_eval_tool/run_eval.sh both`.
+6. Inspect `report.txt` for aggregate quality and wrong cases.
 
 ## More Documentation
 
 - [Training launcher README](slurm_llamafactory/README.md)
+- [Merged model exporter README](llamafactory_export_tool/README.md)
 - [Evaluation tool README](llamafactory_eval_tool/README.md)
