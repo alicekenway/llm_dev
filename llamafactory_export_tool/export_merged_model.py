@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -90,7 +91,63 @@ def set_deep(mapping: dict[str, Any], keys: list[str], value: Any) -> None:
     target[keys[-1]] = value
 
 
+def first_simple_yaml_value(path: Path, key: str) -> str | None:
+    pattern = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.*?)\s*(?:#.*)?$")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError:
+        return None
+    for line in lines:
+        match = pattern.match(line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if not value:
+            return None
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            value = value[1:-1]
+        return value
+    return None
+
+
+def find_training_config(adapter: Path) -> Path | None:
+    names = ["sft.yaml", "sft.yml", "train.yaml", "train.yml", "training.yaml", "training.yml"]
+    search_parents = [adapter, *list(adapter.parents)[:8]]
+    for parent in search_parents:
+        matches = [parent / name for name in names if (parent / name).exists()]
+        if matches:
+            return matches[0]
+
+    for parent in search_parents:
+        if parent == parent.parent:
+            continue
+        candidates = sorted(parent.glob("*.yaml")) + sorted(parent.glob("*.yml"))
+        for candidate in candidates:
+            if first_simple_yaml_value(candidate, "template"):
+                return candidate
+    return None
+
+
+def resolve_template(args: argparse.Namespace, adapter: Path) -> str | None:
+    if args.template:
+        return args.template
+    if args.no_template_auto_detect:
+        return None
+
+    training_config = Path(args.training_config).expanduser().resolve() if args.training_config else find_training_config(adapter)
+    if training_config is None:
+        return None
+    if not training_config.exists():
+        raise SystemExit(f"training config does not exist: {training_config}")
+
+    template = first_simple_yaml_value(training_config, "template")
+    if template:
+        print(f"Detected template from {training_config}: {template}")
+    return template
+
+
 def build_export_config(args: argparse.Namespace, base_model: Path, adapter: Path, output_dir: Path) -> dict[str, Any]:
+    template = resolve_template(args, adapter)
     if args.config_format == "v1":
         config: dict[str, Any] = {
             "model": str(base_model),
@@ -102,8 +159,8 @@ def build_export_config(args: argparse.Namespace, base_model: Path, adapter: Pat
                 "infer_dtype": args.infer_dtype,
             },
         }
-        if args.template:
-            config["template"] = args.template
+        if template:
+            config["template"] = template
         if args.trust_remote_code:
             config["trust_remote_code"] = True
     else:
@@ -117,8 +174,8 @@ def build_export_config(args: argparse.Namespace, base_model: Path, adapter: Pat
             "infer_dtype": args.infer_dtype,
             "trust_remote_code": args.trust_remote_code,
         }
-        if args.template:
-            config["template"] = args.template
+        if template:
+            config["template"] = template
 
     for keys, value in args.set:
         set_deep(config, keys, value)
@@ -181,6 +238,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generated LLaMA-Factory export config format. Default: classic.",
     )
     parser.add_argument("--template", help="Optional LLaMA-Factory template name.")
+    parser.add_argument("--training-config", help="Training YAML to read template from when --template is omitted.")
+    parser.add_argument(
+        "--no-template-auto-detect",
+        action="store_true",
+        help="Do not search adapter parent directories for a training YAML with template.",
+    )
     parser.add_argument(
         "--infer-dtype",
         choices=["auto", "float16", "bfloat16", "float32"],

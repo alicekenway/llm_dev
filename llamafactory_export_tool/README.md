@@ -27,12 +27,16 @@ By default, the generated config uses the classic `llamafactory-cli export` keys
 model_name_or_path: /path/to/base_model
 adapter_name_or_path: /path/to/lora_adapter
 finetuning_type: lora
+template: qwen3_nothink
 export_dir: /path/to/merged_model
 export_size: 5
 export_device: auto
 infer_dtype: auto
 trust_remote_code: true
 ```
+
+If `--template` is omitted, the wrapper searches the adapter directory and nearby parent directories for a training YAML such as `sft.yaml` and copies its `template` value.
+Pass `--template TEMPLATE` to set it explicitly, or `--no-template-auto-detect` to leave it unset.
 
 Run under Slurm when the model needs a GPU:
 
@@ -42,6 +46,7 @@ srun --partition=h200.141gb --gres=gpu:1 --mem=120GB \
     --base-model /mnt/users/jinyang_wang/LLM/model/Qwen3.5-9B \
     --adapter /mnt/users/jinyang_wang/LLM/training_expts_llamaFactory/expts1/saves/qwen3-30b-a3b/lora/sft-code \
     --output-dir /mnt/users/jinyang_wang/LLM/training_expts_llamaFactory/exports/expts1_merged \
+    --training-config /mnt/users/jinyang_wang/LLM/training_expts_llamaFactory/expts1/sft.yaml \
     --env-dir /mnt/users/jinyang_wang/LLM/llamafactory_env
 ```
 
@@ -60,6 +65,9 @@ model:
 
 - `--config-format classic`: default, writes flat LLaMA-Factory export keys such as `model_name_or_path`, `adapter_name_or_path`, and `export_dir`.
 - `--config-format v1`: writes the newer `model` plus `peft_config` structure for LLaMA-Factory installs that use the v1 export path.
+- `--template TEMPLATE`: explicit LLaMA-Factory template. For the current Qwen3.5 runs, use `qwen3_nothink`, matching the training YAML.
+- `--training-config PATH`: read `template` from a specific training YAML when `--template` is omitted.
+- `--no-template-auto-detect`: do not infer `template` from nearby training configs.
 - `--infer-dtype auto|float16|bfloat16|float32`: dtype used during export.
 - `--export-size N`: model shard size in GB.
 - `--allow-existing-output`: allow writing into a non-empty output directory.
